@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  PROFESSIONAL
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role     @default(PROFESSIONAL)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  appointments Appointment[]
+
+  @@map("users")
+}
+
+model Service {
+  id                String   @id @default(uuid())
+  name              String
+  description       String?
+  price             Decimal  @db.Decimal(10, 2)
+  durationInMinutes Int      @map("duration_minutes")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  appointments Appointment[]
+
+  @@map("services")
+}
+
+model Appointment {
+  id             String            @id @default(uuid())
+  clientName     String            @map("client_name")
+  clientPhone    String            @map("client_phone")
+  startTime      DateTime          @map("start_time")
+  endTime        DateTime          @map("end_time")
+  status         AppointmentStatus @default(CONFIRMED)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  professionalId String            @map("professional_id")
+  professional   User              @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  serviceId      String            @map("service_id")
+  service        Service           @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([startTime, endTime])
+  @@index([professionalId])
+  @@map("appointments")
+}
