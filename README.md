@@ -4,6 +4,16 @@ Projeto de Extensão I — Análise e Desenvolvimento de Sistemas (Anhanguera).
 
 API NestJS + Prisma + PostgreSQL e frontend React (Vite) com login seguro.
 
+## Telas
+
+### Painel
+
+![Painel do salão](docs/screenshots/painel.jpg)
+
+### Como usar
+
+![Guia Como usar](docs/screenshots/como-usar.jpg)
+
 ## Stack
 
 - NestJS 10 + Prisma 5 + PostgreSQL
