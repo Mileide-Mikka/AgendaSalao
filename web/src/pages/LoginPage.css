@@ -1,0 +1,202 @@
+.login {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(320px, 480px) 1fr;
+  background: #000;
+}
+
+.login__form-side {
+  padding: clamp(1.5rem, 4vw, 3rem);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.login__brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 2.4rem;
+}
+
+.login__brand-icon {
+  color: #c5a05f;
+  width: 34px;
+  height: 34px;
+}
+
+.login__brand strong {
+  display: block;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.7rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.login__brand span {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9a9a9a;
+}
+
+.login__form-side h1 {
+  margin: 0;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(2rem, 4vw, 2.6rem);
+  font-weight: 600;
+}
+
+.login__form-side > p {
+  margin: 0.55rem 0 1.6rem;
+  color: #9a9a9a;
+}
+
+.login__form {
+  display: grid;
+  gap: 1rem;
+}
+
+.login__field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.login__field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.login__field span {
+  font-size: 0.85rem;
+  color: #cfcfcf;
+}
+
+.login__forgot {
+  border: 0;
+  background: transparent;
+  color: #c5a05f;
+  font-size: 0.82rem;
+  padding: 0;
+}
+
+.login__field input {
+  border: 1px solid #2a2a2a;
+  background: #1f1f1f;
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+  color: #fff;
+  outline: none;
+}
+
+.login__field input:focus {
+  border-color: #c5a05f;
+}
+
+.login__field em,
+.login__error {
+  font-style: normal;
+  color: #c47a74;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.login__password {
+  position: relative;
+}
+
+.login__password input {
+  width: 100%;
+  padding-right: 5.2rem;
+}
+
+.login__password button {
+  position: absolute;
+  right: 0.55rem;
+  top: 50%;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: #c5a05f;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.login__submit {
+  margin-top: 0.35rem;
+  border: 0;
+  border-radius: 12px;
+  background: #c5a05f;
+  color: #111;
+  font-weight: 700;
+  padding: 0.95rem 1rem;
+}
+
+.login__footer {
+  margin: 1.4rem 0 0;
+  color: #8a8a8a;
+  font-size: 0.9rem;
+}
+
+.login__footer button {
+  border: 0;
+  background: transparent;
+  color: #c5a05f;
+  font-weight: 600;
+  padding: 0;
+}
+
+.login__hero {
+  position: relative;
+  min-height: 100dvh;
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.55)),
+    url('https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&w=1600&q=80')
+      center/cover no-repeat;
+}
+
+.login__quote {
+  position: absolute;
+  left: 2rem;
+  right: 2rem;
+  bottom: 2.5rem;
+  max-width: 420px;
+  color: #fff;
+}
+
+.login__quote p {
+  margin: 0;
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(1.3rem, 2.4vw, 1.8rem);
+  line-height: 1.35;
+  font-style: italic;
+}
+
+.login__quote cite {
+  display: block;
+  margin-top: 0.75rem;
+  font-style: normal;
+  color: #c5a05f;
+  font-size: 0.9rem;
+}
+
+@media (max-width: 900px) {
+  .login {
+    grid-template-columns: 1fr;
+  }
+
+  .login__hero {
+    min-height: 280px;
+    order: -1;
+  }
+
+  .login__quote {
+    left: 1.25rem;
+    right: 1.25rem;
+    bottom: 1.25rem;
+  }
+}

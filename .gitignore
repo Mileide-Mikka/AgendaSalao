@@ -1,4 +1,8 @@
 /node_modules
 /dist
 .env
+*.tsbuildinfo
+.cursor/
+web/node_modules
+web/dist
 

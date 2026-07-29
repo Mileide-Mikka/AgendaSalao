@@ -15,27 +15,52 @@ enum Role {
 enum AppointmentStatus {
   PENDING
   CONFIRMED
+  COMPLETED
   CANCELLED
 }
 
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role     @default(PROFESSIONAL)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id                  String    @id @default(uuid())
+  name                String
+  email               String    @unique
+  password            String
+  phone               String?
+  title               String?
+  role                Role      @default(PROFESSIONAL)
+  mustChangePassword  Boolean   @default(false) @map("must_change_password")
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   appointments Appointment[]
 
   @@map("users")
 }
 
+model Client {
+  id                    String   @id @default(uuid())
+  name                  String
+  phone                 String
+  phoneIsWhatsapp       Boolean  @default(false) @map("phone_is_whatsapp")
+  prefersMessageContact Boolean  @default(false) @map("prefers_message_contact")
+  email                 String?
+  notes                 String?
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  appointments Appointment[]
+
+  @@index([name])
+  @@index([phone])
+  @@map("clients")
+}
+
 model Service {
   id                String   @id @default(uuid())
   name              String
   description       String?
+  category          String   @default("Geral")
   price             Decimal  @db.Decimal(10, 2)
   durationInMinutes Int      @map("duration_minutes")
   createdAt         DateTime @default(now()) @map("created_at")
@@ -47,22 +72,25 @@ model Service {
 }
 
 model Appointment {
-  id             String            @id @default(uuid())
-  clientName     String            @map("client_name")
-  clientPhone    String            @map("client_phone")
-  startTime      DateTime          @map("start_time")
-  endTime        DateTime          @map("end_time")
-  status         AppointmentStatus @default(CONFIRMED)
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
+  id        String            @id @default(uuid())
+  startTime DateTime          @map("start_time")
+  endTime   DateTime          @map("end_time")
+  status    AppointmentStatus @default(CONFIRMED)
+  notes     String?
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
 
-  professionalId String            @map("professional_id")
-  professional   User              @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  clientId String @map("client_id")
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
-  serviceId      String            @map("service_id")
-  service        Service           @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  professionalId String @map("professional_id")
+  professional   User   @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+
+  serviceId String  @map("service_id")
+  service   Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
   @@index([startTime, endTime])
   @@index([professionalId])
+  @@index([clientId])
   @@map("appointments")
 }

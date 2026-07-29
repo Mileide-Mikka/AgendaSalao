@@ -1,33 +1,33 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Role } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+/**
+ * Seed mínimo: só a conta admin.
+ * O salão começa vazio — clientes, serviços, profissionais e agenda
+ * são cadastrados pelo usuário.
+ */
 async function main() {
   await prisma.appointment.deleteMany();
   await prisma.service.deleteMany();
+  await prisma.client.deleteMany();
   await prisma.user.deleteMany();
 
-  const professional = await prisma.user.create({
+  const passwordHash = await bcrypt.hash('senhaSegura123', 10);
+
+  const admin = await prisma.user.create({
     data: {
-      name: 'Vítor Cabeleireiro',
-      email: 'vitor@salaoflow.com',
-      password: 'senhaSegura123',
-      role: 'PROFESSIONAL',
+      name: 'Administrador',
+      email: 'admin@salaoflow.com',
+      password: passwordHash,
+      role: Role.ADMIN,
+      mustChangePassword: true,
     },
   });
 
-  const service = await prisma.service.create({
-    data: {
-      name: 'Corte de Cabelo Masculino',
-      description: 'Corte moderno com lavagem incluída',
-      price: 25.00,
-      durationInMinutes: 30,
-    },
-  });
-
-  console.log('🌱 Banco de dados populado com sucesso!');
-  console.log(`ID do Profissional: ${professional.id}`);
-  console.log(`ID do Serviço: ${service.id}`);
+  console.log('Seed concluído — base vazia, pronta para cadastros.');
+  console.log(`Admin: ${admin.email} / senhaSegura123`);
 }
 
 main()

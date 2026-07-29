@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agenda-salao-db
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: salao
+      POSTGRES_PASSWORD: salao123
+      POSTGRES_DB: salao_db
+    volumes:
+      - agenda_salao_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salao -d salao_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  agenda_salao_pgdata:
