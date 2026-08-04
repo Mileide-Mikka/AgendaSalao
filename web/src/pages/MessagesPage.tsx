@@ -1,76 +1,128 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, type Client } from '../lib/api';
-import { formatBrPhone, isValidBrMobile, phoneDigits } from '../lib/phone';
+import { initials } from '../lib/format';
+import { formatBrPhone } from '../lib/phone';
 import {
   MESSAGE_TEMPLATES,
+  appendMessageLog,
   applyTemplate,
-  openWhatsApp,
-  readWhatsAppConnection,
-  saveWhatsAppConnection,
-  type WhatsAppConnection,
+  messagesForClient,
+  openWhatsAppWeb,
+  readMessageLog,
+  subscribeMessageLog,
+  type LocalMessage,
 } from '../lib/whatsapp';
 
-const SALON_SETTINGS_KEY = 'belle-salon-settings';
+import { readLocalSalonSettings } from '../lib/salonSettings';
+
+const DRAFTS_KEY = 'belle-message-drafts';
+const CLIENTS_POLL_MS = 8_000;
 
 function salonName(): string {
+  const name = readLocalSalonSettings().name?.trim();
+  return name || 'nosso salão';
+}
+
+function readDrafts(): Record<string, string> {
   try {
-    const raw = localStorage.getItem(SALON_SETTINGS_KEY);
-    if (!raw) return 'nosso salão';
-    const parsed = JSON.parse(raw) as { name?: string };
-    return parsed.name?.trim() || 'nosso salão';
+    const raw = sessionStorage.getItem(DRAFTS_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, string>;
   } catch {
-    return 'nosso salão';
+    return {};
   }
 }
 
-type ApiStatus = {
-  configured: boolean;
-  displayPhone: string | null;
-  notes: string[];
-};
+function writeDraft(clientId: string, body: string) {
+  const all = readDrafts();
+  if (!body.trim()) delete all[clientId];
+  else all[clientId] = body;
+  sessionStorage.setItem(DRAFTS_KEY, JSON.stringify(all));
+}
+
+function formatMsgTime(iso: string, now = Date.now()) {
+  const t = new Date(iso).getTime();
+  const diffSec = Math.max(0, Math.round((now - t) / 1000));
+  if (diffSec < 10) return 'agora';
+  if (diffSec < 60) return `há ${diffSec}s`;
+  if (diffSec < 3600) return `há ${Math.floor(diffSec / 60)} min`;
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
 
 export function MessagesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [clients, setClients] = useState<Client[]>([]);
+  const [log, setLog] = useState<LocalMessage[]>(() => readMessageLog());
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [apiStatus, setApiStatus] = useState<ApiStatus | null>(null);
-  const [connection, setConnection] = useState<WhatsAppConnection>(() =>
-    readWhatsAppConnection(),
-  );
-  const [connectPhone, setConnectPhone] = useState(() =>
-    formatBrPhone(readWhatsAppConnection().phone),
-  );
-  const [connectLabel, setConnectLabel] = useState(
-    () => readWhatsAppConnection().label || '',
-  );
-  const [connectError, setConnectError] = useState<string | null>(null);
+  const [hint, setHint] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string>('');
   const [templateId, setTemplateId] = useState(MESSAGE_TEMPLATES[0].id);
   const [message, setMessage] = useState('');
-  const [filter, setFilter] = useState<'whatsapp' | 'prefer'>('whatsapp');
-  const [sending, setSending] = useState(false);
+  const [filter, setFilter] = useState<'whatsapp' | 'prefer' | 'all'>('whatsapp');
+  const [tipOpen, setTipOpen] = useState(false);
+  const [liveClock, setLiveClock] = useState(() => Date.now());
+  const [syncLabel, setSyncLabel] = useState('ao vivo');
+
+  const threadEndRef = useRef<HTMLDivElement | null>(null);
+
+  const reloadLog = useCallback(() => {
+    setLog(readMessageLog());
+  }, []);
+
+  const loadClients = useCallback(async (silent = false) => {
+    try {
+      if (!silent) setSyncLabel('atualizando…');
+      const list = await api.clients.list();
+      setClients(list);
+      setError(null);
+      setSyncLabel('ao vivo');
+    } catch (err) {
+      if (!silent) {
+        setError(err instanceof Error ? err.message : 'Erro ao carregar clientes');
+      }
+      setSyncLabel('reconectando…');
+    }
+  }, []);
 
   useEffect(() => {
-    void api.clients
-      .list()
-      .then(setClients)
-      .catch((err) =>
-        setError(err instanceof Error ? err.message : 'Erro ao carregar clientes'),
-      );
-    void api.whatsapp
-      .status()
-      .then((s) =>
-        setApiStatus({
-          configured: s.configured,
-          displayPhone: s.displayPhone,
-          notes: s.notes,
-        }),
-      )
-      .catch(() =>
-        setApiStatus({ configured: false, displayPhone: null, notes: [] }),
-      );
+    void loadClients(false);
+  }, [loadClients]);
+
+  /* Real-time: clientes e histórico */
+  useEffect(() => {
+    const tick = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void loadClients(true);
+    }, CLIENTS_POLL_MS);
+
+    const onFocus = () => void loadClients(true);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void loadClients(true);
+        reloadLog();
+      }
+    };
+
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.clearInterval(tick);
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [loadClients, reloadLog]);
+
+  useEffect(() => subscribeMessageLog(reloadLog), [reloadLog]);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setLiveClock(Date.now()), 15_000);
+    return () => window.clearInterval(id);
   }, []);
 
   useEffect(() => {
@@ -78,337 +130,369 @@ export function MessagesPage() {
     if (fromQuery) setSelectedId(fromQuery);
   }, [searchParams]);
 
+  const lastByClient = useMemo(() => {
+    const map = new Map<string, LocalMessage>();
+    for (const msg of log) {
+      const prev = map.get(msg.clientId);
+      if (!prev || prev.createdAt < msg.createdAt) map.set(msg.clientId, msg);
+    }
+    return map;
+  }, [log]);
+
   const reachable = useMemo(() => {
-    return clients.filter((c) => {
-      if (filter === 'prefer') return Boolean(c.prefersMessageContact);
-      return Boolean(c.phoneIsWhatsapp);
-    });
-  }, [clients, filter]);
+    const q = query.trim().toLowerCase();
+    return clients
+      .filter((c) => {
+        if (filter === 'prefer') return Boolean(c.prefersMessageContact);
+        if (filter === 'whatsapp') return Boolean(c.phoneIsWhatsapp);
+        return true;
+      })
+      .filter((c) => {
+        if (!q) return true;
+        return (
+          c.name.toLowerCase().includes(q) ||
+          phoneDigitsLoose(c.phone).includes(phoneDigitsLoose(q))
+        );
+      })
+      .sort((a, b) => {
+        const la = lastByClient.get(a.id)?.createdAt ?? '';
+        const lb = lastByClient.get(b.id)?.createdAt ?? '';
+        if (la !== lb) return lb.localeCompare(la);
+        return a.name.localeCompare(b.name, 'pt-BR');
+      });
+  }, [clients, filter, query, lastByClient]);
 
   const selected = clients.find((c) => c.id === selectedId) ?? null;
-  const canSendDirect = Boolean(apiStatus?.configured);
 
+  const thread = useMemo(
+    () => (selectedId ? messagesForClient(selectedId, log) : []),
+    [selectedId, log],
+  );
+
+  /* Ao trocar de conversa: restaura rascunho ou aplica modelo */
   useEffect(() => {
-    if (!selected) return;
-    const tpl =
-      MESSAGE_TEMPLATES.find((t) => t.id === templateId) ?? MESSAGE_TEMPLATES[0];
-    setMessage(
-      applyTemplate(tpl.body, {
-        nome: selected.name.split(' ')[0] || selected.name,
-        salao: salonName(),
-      }),
-    );
-  }, [selectedId, templateId, selected]);
-
-  function onConnect(e: FormEvent) {
-    e.preventDefault();
-    setConnectError(null);
-    if (!isValidBrMobile(connectPhone)) {
-      setConnectError('Informe o celular do WhatsApp do estabelecimento com DDD.');
+    if (!selected) {
+      setMessage('');
       return;
     }
-    const next: WhatsAppConnection = {
-      phone: phoneDigits(connectPhone),
-      label: connectLabel.trim() || 'WhatsApp do salão',
-      connected: true,
-      connectedAt: new Date().toISOString(),
-    };
-    saveWhatsAppConnection(next);
-    setConnection(next);
+    const saved = readDrafts()[selected.id];
+    if (saved && saved.trim()) {
+      setMessage(saved);
+      return;
+    }
+    const tpl =
+      MESSAGE_TEMPLATES.find((t) => t.id === templateId) ?? MESSAGE_TEMPLATES[0];
+    const body = applyTemplate(tpl.body, {
+      nome: selected.name.split(' ')[0] || selected.name,
+      salao: salonName(),
+    });
+    setMessage(body);
+    writeDraft(selected.id, body);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só ao mudar conversa
+  }, [selectedId]);
+
+  function applyTemplateToComposer(nextTemplateId: string) {
+    if (!selected) return;
+    setTemplateId(nextTemplateId);
+    const tpl =
+      MESSAGE_TEMPLATES.find((t) => t.id === nextTemplateId) ?? MESSAGE_TEMPLATES[0];
+    const body = applyTemplate(tpl.body, {
+      nome: selected.name.split(' ')[0] || selected.name,
+      salao: salonName(),
+    });
+    setMessage(body);
+    writeDraft(selected.id, body);
   }
 
-  function onDisconnect() {
-    const next: WhatsAppConnection = {
-      ...connection,
-      connected: false,
-      connectedAt: undefined,
-    };
-    saveWhatsAppConnection(next);
-    setConnection(next);
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [thread.length, message, selectedId]);
+
+  function selectClient(client: Client) {
+    setSelectedId(client.id);
+    setSearchParams({ clientId: client.id });
+    setError(null);
+    setHint(null);
   }
 
-  async function sendToClient() {
-    if (!selected?.phoneIsWhatsapp) {
-      setError('Selecione um cliente com WhatsApp cadastrado.');
+  function onMessageChange(value: string) {
+    setMessage(value);
+    if (selectedId) writeDraft(selectedId, value);
+  }
+
+  function sendToClient() {
+    if (!selected) {
+      setError('Selecione um cliente na lista.');
+      return;
+    }
+    if (!selected.phoneIsWhatsapp) {
+      setError('Este cliente não está marcado com WhatsApp. Edite o cadastro.');
       return;
     }
     if (!message.trim()) {
-      setError('Escreva uma mensagem.');
+      setError('Escreva uma mensagem antes de enviar.');
       return;
     }
 
     setError(null);
-    setSuccess(null);
-
-    if (canSendDirect) {
-      setSending(true);
-      try {
-        const result = await api.whatsapp.send({
-          to: selected.phone,
-          message: message.trim(),
-        });
-        setSuccess(
-          `Mensagem enviada diretamente pelo WhatsApp do salão${
-            result.messageId ? ` (${result.messageId.slice(0, 12)}…)` : ''
-          }.`,
-        );
-      } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : 'Falha ao enviar pela API da Meta',
-        );
-      } finally {
-        setSending(false);
-      }
-      return;
-    }
-
-    if (!connection.connected) {
-      setError(
-        'Configure a Cloud API da Meta no servidor (.env) para envio direto, ou salve o número do salão abaixo para o modo link.',
-      );
-      return;
-    }
-    openWhatsApp(selected.phone, message);
+    const entry = appendMessageLog({
+      clientId: selected.id,
+      clientName: selected.name,
+      phone: selected.phone,
+      body: message.trim(),
+    });
+    /* Optimistic UI: also patch state immediately (same tab is instant) */
+    setLog((prev) => [entry, ...prev.filter((m) => m.id !== entry.id)].slice(0, 200));
+    writeDraft(selected.id, '');
+    setMessage('');
+    openWhatsAppWeb(selected.phone, entry.body);
+    setHint(
+      'Histórico atualizado. Confirme o envio no WhatsApp Web — ao voltar, a lista e o chat já estarão sincronizados.',
+    );
   }
 
   return (
-    <>
-      <header className="page-head">
+    <div className="chat-page">
+      <header className="page-head chat-page__head">
         <div>
           <h1>Comunicações</h1>
-          <p>Envio pelo WhatsApp do salão via API da Meta (sem tela wa.me).</p>
+          <p>Central de mensagens do salão — lista e histórico atualizam em tempo real.</p>
+        </div>
+        <div className="chat-head-actions">
+          <span className="chat-live" title="Clientes e histórico sincronizam automaticamente">
+            <span className="chat-live__dot" aria-hidden />
+            {syncLabel}
+          </span>
+          <button
+            type="button"
+            className="btn btn--soft"
+            onClick={() => setTipOpen((v) => !v)}
+          >
+            {tipOpen ? 'Ocultar dica' : 'Como funciona'}
+          </button>
         </div>
       </header>
 
+      {tipOpen ? (
+        <div className="chat-tip">
+          <p>
+            Esta tela atualiza sozinha: novos clientes no cadastro, rascunhos, histórico e
+            a ordem da lista. O envio final ainda passa pelo WhatsApp Web (gratuito).{' '}
+            <strong>Respostas do cliente no WhatsApp não entram aqui</strong> — a Meta não
+            libera isso sem a API paga.
+          </p>
+          <p>
+            Mantenha{' '}
+            <a href="https://web.whatsapp.com" target="_blank" rel="noreferrer">
+              web.whatsapp.com
+            </a>{' '}
+            logado no navegador com o celular do salão.
+          </p>
+        </div>
+      ) : null}
+
       {error ? <div className="error-banner">{error}</div> : null}
-      {success ? (
+      {hint ? (
         <div
           className="error-banner"
           style={{ color: 'var(--ok)', background: 'var(--ok-soft)' }}
         >
-          {success}
+          {hint}
         </div>
       ) : null}
 
-      <section className="settings-card msg-connect">
-        <h2>WhatsApp Cloud API (Meta)</h2>
-        {canSendDirect ? (
-          <div className="msg-status">
-            <div>
-              <strong className="msg-status__ok">API conectada</strong>
-              <p>
-                Envio direto ativo
-                {apiStatus?.displayPhone
-                  ? ` · ${formatBrPhone(apiStatus.displayPhone)}`
-                  : ''}
-              </p>
-              <p className="entity-card__meta">
-                Mensagens saem do número oficial do salão, sem abrir o site do
-                WhatsApp.
-              </p>
-            </div>
+      <div className="chat-shell">
+        <aside className="chat-sidebar">
+          <div className="chat-sidebar__search">
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar cliente…"
+              aria-label="Buscar cliente"
+            />
           </div>
-        ) : (
-          <div className="msg-setup">
-            <p className="msg-lead">
-              A tela verde do WhatsApp (wa.me) é o modo antigo por link. Para
-              mandar <strong>direto do sistema</strong>, use a Cloud API da Meta.
-            </p>
-            <ul className="msg-steps">
-              <li>
-                Crie um app em{' '}
-                <a
-                  href="https://developers.facebook.com/apps"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  developers.facebook.com
-                </a>{' '}
-                e adicione o produto <strong>WhatsApp</strong>.
-              </li>
-              <li>
-                Em <strong>API Setup</strong>, copie o{' '}
-                <strong>Temporary access token</strong> (ou gere um permanente) e
-                o <strong>Phone number ID</strong>.
-              </li>
-              <li>
-                Cole no arquivo <code>.env</code> da API:
-                <pre className="msg-code">{`WHATSAPP_ACCESS_TOKEN=seu_token
-WHATSAPP_PHONE_NUMBER_ID=seu_phone_number_id
-WHATSAPP_DISPLAY_PHONE=11999990000`}</pre>
-              </li>
-              <li>Reinicie a API (`yarn start:dev`) e recarregue esta página.</li>
-            </ul>
-            <p className="msg-lead">
-              <strong>Custo:</strong> a Cloud API em si é gratuita para usar.
-              Respostas de atendimento na janela de 24h (depois que o cliente
-              escreve) são gratuitas. Modelos de marketing/utilidade fora dessa
-              janela podem ser cobrados pela Meta.
-            </p>
-          </div>
-        )}
-      </section>
-
-      <section className="settings-card msg-connect">
-        <h2>Número de referência do salão (opcional)</h2>
-        <p className="msg-lead">
-          Usado só como identificação local / fallback por link se a API ainda
-          não estiver configurada.
-        </p>
-
-        {connection.connected ? (
-          <div className="msg-status">
-            <div>
-              <strong>Salvo</strong>
-              <p>
-                {connection.label || 'WhatsApp'} ·{' '}
-                {formatBrPhone(connection.phone)}
-              </p>
-            </div>
-            <button type="button" className="btn btn--soft" onClick={onDisconnect}>
-              Remover
-            </button>
-          </div>
-        ) : (
-          <form className="form-grid" onSubmit={onConnect}>
-            {connectError ? <div className="error-banner">{connectError}</div> : null}
-            <div className="form-grid form-grid--2">
-              <label className="field">
-                <span>Número do WhatsApp</span>
-                <input
-                  value={connectPhone}
-                  onChange={(e) => setConnectPhone(formatBrPhone(e.target.value))}
-                  placeholder="(11) 98765-4321"
-                  inputMode="tel"
-                  required
-                />
-              </label>
-              <label className="field">
-                <span>Nome de exibição</span>
-                <input
-                  value={connectLabel}
-                  onChange={(e) => setConnectLabel(e.target.value)}
-                  placeholder="Ex.: Belle Salão"
-                />
-              </label>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-              <button type="submit" className="btn btn--soft">
-                Salvar número
-              </button>
-            </div>
-          </form>
-        )}
-      </section>
-
-      <div className="msg-layout">
-        <section className="settings-card msg-clients">
-          <div className="msg-clients__head">
-            <h2>Clientes</h2>
-            <div className="filters" style={{ margin: 0 }}>
+          <div className="chat-sidebar__filters" role="tablist" aria-label="Filtro">
+            {(
+              [
+                ['whatsapp', 'WhatsApp'],
+                ['prefer', 'Preferem msg'],
+                ['all', 'Todos'],
+              ] as const
+            ).map(([id, label]) => (
               <button
+                key={id}
                 type="button"
-                className={filter === 'whatsapp' ? 'is-active' : ''}
-                onClick={() => setFilter('whatsapp')}
+                className={filter === id ? 'is-active' : ''}
+                onClick={() => setFilter(id)}
               >
-                Com WhatsApp
+                {label}
               </button>
-              <button
-                type="button"
-                className={filter === 'prefer' ? 'is-active' : ''}
-                onClick={() => setFilter('prefer')}
-              >
-                Preferem mensagem
-              </button>
-            </div>
-          </div>
-
-          <ul className="msg-list">
-            {reachable.map((client) => (
-              <li key={client.id}>
-                <button
-                  type="button"
-                  className={`msg-list__item${selectedId === client.id ? ' is-active' : ''}`}
-                  onClick={() => {
-                    setSelectedId(client.id);
-                    setSearchParams({ clientId: client.id });
-                  }}
-                >
-                  <strong>{client.name}</strong>
-                  <span>{formatBrPhone(client.phone)}</span>
-                  {client.prefersMessageContact ? (
-                    <em>Prefere mensagem</em>
-                  ) : null}
-                </button>
-              </li>
             ))}
+          </div>
+          <ul className="chat-contacts">
+            {reachable.map((client) => {
+              const last = lastByClient.get(client.id);
+              const draft =
+                client.id === selectedId && message.trim()
+                  ? message.trim()
+                  : readDrafts()[client.id];
+              const preview = draft
+                ? `Rascunho: ${truncate(draft, 40)}`
+                : last?.body
+                  ? truncate(last.body, 48)
+                  : formatBrPhone(client.phone);
+              return (
+                <li key={client.id}>
+                  <button
+                    type="button"
+                    className={`chat-contact${selectedId === client.id ? ' is-active' : ''}`}
+                    onClick={() => selectClient(client)}
+                  >
+                    <span className="chat-avatar" aria-hidden>
+                      {initials(client.name)}
+                    </span>
+                    <span className="chat-contact__body">
+                      <span className="chat-contact__top">
+                        <strong>{client.name}</strong>
+                        {last ? (
+                          <time dateTime={last.createdAt}>
+                            {formatMsgTime(last.createdAt, liveClock)}
+                          </time>
+                        ) : null}
+                      </span>
+                      <span className="chat-contact__preview">{preview}</span>
+                    </span>
+                    {!client.phoneIsWhatsapp ? (
+                      <span className="chat-badge chat-badge--warn">sem WA</span>
+                    ) : client.prefersMessageContact ? (
+                      <span className="chat-badge">msg</span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
           {!reachable.length ? (
-            <p className="empty">
-              Nenhum cliente com WhatsApp. Cadastre o número e marque a opção no
-              perfil do cliente.
+            <p className="chat-empty-side">
+              Nenhum cliente neste filtro. Cadastre WhatsApp no perfil do cliente.
             </p>
           ) : null}
-        </section>
+        </aside>
 
-        <section className="settings-card msg-compose">
-          <h2>Enviar mensagem</h2>
-          {!canSendDirect ? (
-            <p className="msg-lead">
-              Sem Cloud API configurada, o botão ainda abre o WhatsApp no
-              navegador (tela wa.me). Configure o .env para envio direto.
-            </p>
-          ) : null}
+        <section className="chat-main">
           {!selected ? (
-            <p className="msg-lead">Selecione um cliente à esquerda.</p>
+            <div className="chat-empty">
+              <div className="chat-empty__icon" aria-hidden>
+                ✂
+              </div>
+              <h2>Selecione uma conversa</h2>
+              <p>
+                Escolha um cliente à esquerda. A lista e o histórico se atualizam
+                automaticamente enquanto você trabalha.
+              </p>
+            </div>
           ) : (
             <>
-              <p className="msg-lead">
-                Para <strong>{selected.name}</strong> ·{' '}
-                {formatBrPhone(selected.phone)}
-              </p>
-              <label className="field">
-                <span>Modelo</span>
-                <select
-                  value={templateId}
-                  onChange={(e) => setTemplateId(e.target.value)}
-                >
-                  {MESSAGE_TEMPLATES.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="field">
-                <span>Mensagem</span>
-                <textarea
-                  rows={6}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  maxLength={1000}
-                />
-              </label>
-              <div className="modal__actions">
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  disabled={sending || (!canSendDirect && !connection.connected)}
-                  onClick={() => void sendToClient()}
-                >
-                  {sending
-                    ? 'Enviando…'
-                    : canSendDirect
-                      ? 'Enviar pelo WhatsApp do salão'
-                      : 'Abrir no WhatsApp (link)'}
-                </button>
+              <header className="chat-thread__head">
+                <div className="chat-thread__who">
+                  <span className="chat-avatar chat-avatar--lg" aria-hidden>
+                    {initials(selected.name)}
+                  </span>
+                  <div>
+                    <h2>{selected.name}</h2>
+                    <p>
+                      {formatBrPhone(selected.phone)}
+                      {selected.phoneIsWhatsapp ? ' · WhatsApp' : ' · sem WhatsApp'}
+                      {selected.prefersMessageContact ? ' · prefere mensagem' : ''}
+                    </p>
+                  </div>
+                </div>
+                <span className="chat-live chat-live--sm">
+                  <span className="chat-live__dot" aria-hidden />
+                  {syncLabel}
+                </span>
+              </header>
+
+              <div className="chat-thread__body">
+                {thread.length === 0 && !message.trim() ? (
+                  <div className="chat-thread__placeholder">
+                    <p>
+                      Nenhuma mensagem ainda para {selected.name.split(' ')[0]}. Escreva
+                      abaixo — o rascunho aparece aqui na hora.
+                    </p>
+                  </div>
+                ) : (
+                  <ul className="chat-bubbles">
+                    {thread.map((msg) => (
+                      <li key={msg.id} className="chat-bubble chat-bubble--out">
+                        <p>{msg.body}</p>
+                        <time dateTime={msg.createdAt}>
+                          {formatMsgTime(msg.createdAt, liveClock)} · aberto no WhatsApp
+                        </time>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                {message.trim() ? (
+                  <div className="chat-bubble chat-bubble--draft" aria-live="polite">
+                    <span className="chat-bubble__label">Rascunho · ao vivo</span>
+                    <p>{message.trim()}</p>
+                  </div>
+                ) : null}
+                <div ref={threadEndRef} />
               </div>
+
+              <footer className="chat-composer">
+                <div className="chat-templates" role="group" aria-label="Modelos">
+                  {MESSAGE_TEMPLATES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`chat-chip${templateId === t.id ? ' is-active' : ''}`}
+                      onClick={() => applyTemplateToComposer(t.id)}
+                    >
+                      {t.title}
+                    </button>
+                  ))}
+                </div>
+                <div className="chat-composer__row">
+                  <textarea
+                    rows={3}
+                    value={message}
+                    onChange={(e) => onMessageChange(e.target.value)}
+                    maxLength={1000}
+                    placeholder="Escreva a mensagem…"
+                    aria-label="Mensagem"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn--primary chat-send"
+                    disabled={!message.trim() || !selected.phoneIsWhatsapp}
+                    onClick={sendToClient}
+                  >
+                    Enviar no WhatsApp
+                  </button>
+                </div>
+                <p className="chat-composer__note">
+                  Atualização ao vivo da central do salão. Respostas do cliente só aparecem
+                  no WhatsApp (sem API da Meta).
+                </p>
+              </footer>
             </>
           )}
         </section>
       </div>
-    </>
+    </div>
   );
+}
+
+function phoneDigitsLoose(value: string) {
+  return value.replace(/\D/g, '');
+}
+
+function truncate(text: string, max: number) {
+  const t = text.replace(/\s+/g, ' ').trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1)}…`;
 }

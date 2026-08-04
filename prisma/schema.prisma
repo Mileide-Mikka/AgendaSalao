@@ -15,6 +15,7 @@ enum Role {
 enum AppointmentStatus {
   PENDING
   CONFIRMED
+  WAITING
   COMPLETED
   CANCELLED
 }
@@ -93,4 +94,22 @@ model Appointment {
   @@index([professionalId])
   @@index([clientId])
   @@map("appointments")
+}
+
+// Singleton de informações e horário de funcionamento do salão.
+model BusinessSettings {
+  id                 String   @id @default("default")
+  name               String   @default("Belle Salão & Barbearia")
+  address            String   @default("")
+  openTime           String   @default("09:00") @map("open_time")
+  closeTime          String   @default("19:00") @map("close_time")
+  saturdayOpenTime   String   @default("09:00") @map("saturday_open_time")
+  saturdayCloseTime  String   @default("20:00") @map("saturday_close_time")
+  /// Grade semanal completa (JSON): mon…sun { open, openTime, closeTime }
+  weeklyHours        Json?    @map("weekly_hours")
+  whatsappReminder   Boolean  @default(true) @map("whatsapp_reminder")
+  cancelAlerts       Boolean  @default(false) @map("cancel_alerts")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@map("business_settings")
 }

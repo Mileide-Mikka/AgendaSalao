@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AppointmentModal } from '../components/appointments/AppointmentModal';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { api, type Appointment, type AppointmentStatus } from '../lib/api';
 import {
   formatCurrency,
@@ -7,7 +8,7 @@ import {
   formatTime,
   monthLabel,
   statusClass,
-  statusLabel,
+  statusDisplayLabel,
 } from '../lib/format';
 
 const DOW = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -15,7 +16,8 @@ const STATUS_FILTERS: Array<{ id: 'ALL' | AppointmentStatus; label: string }> = 
   { id: 'ALL', label: 'Todos' },
   { id: 'CONFIRMED', label: 'Confirmado' },
   { id: 'PENDING', label: 'Pendente' },
-  { id: 'COMPLETED', label: 'Concluido' },
+  { id: 'WAITING', label: 'Aguardando' },
+  { id: 'COMPLETED', label: 'Concluído' },
   { id: 'CANCELLED', label: 'Cancelado' },
 ];
 
@@ -31,6 +33,8 @@ export function AgendaPage() {
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [view, setView] = useState<'calendar' | 'list'>('list');
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
 
   const range = useMemo(() => {
     const from = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
@@ -51,13 +55,23 @@ export function AgendaPage() {
     void load();
   }, [range.from, range.to]);
 
-  async function completeAppointment(id: string) {
+  async function setStatus(id: string, status: AppointmentStatus) {
+    setBusyId(id);
     try {
-      await api.appointments.updateStatus(id, 'COMPLETED');
+      await api.appointments.updateStatus(id, status);
       setError(null);
+      if (status === 'CANCELLED') setCancelTarget(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao concluir agendamento');
+      const fallback =
+        status === 'CANCELLED'
+          ? 'Erro ao cancelar agendamento'
+          : status === 'COMPLETED'
+            ? 'Erro ao concluir agendamento'
+            : 'Erro ao atualizar status do agendamento';
+      setError(err instanceof Error ? err.message : fallback);
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -95,12 +109,19 @@ export function AgendaPage() {
     return statusOk && searchOk;
   });
 
+  const waitingCount = items.filter((i) => i.status === 'WAITING').length;
+
   return (
     <>
       <header className="page-head">
         <div>
           <h1>Agendamentos</h1>
-          <p>Lista completa da agenda do salão</p>
+          <p>
+            Lista completa da agenda do salão
+            {waitingCount > 0
+              ? ` · ${waitingCount} cliente${waitingCount > 1 ? 's' : ''} aguardando`
+              : ''}
+          </p>
         </div>
         <button type="button" className="btn btn--primary" onClick={() => setModalOpen(true)}>
           + Novo agendamento
@@ -211,7 +232,10 @@ export function AgendaPage() {
             </div>
             <AgendaTable
               items={selectedItems}
-              onComplete={(id) => void completeAppointment(id)}
+              busyId={busyId}
+              onMarkArrived={(id) => void setStatus(id, 'WAITING')}
+              onComplete={(id) => void setStatus(id, 'COMPLETED')}
+              onRequestCancel={setCancelTarget}
             />
           </section>
         </>
@@ -220,7 +244,10 @@ export function AgendaPage() {
           <AgendaTable
             items={filtered}
             showDate
-            onComplete={(id) => void completeAppointment(id)}
+            busyId={busyId}
+            onMarkArrived={(id) => void setStatus(id, 'WAITING')}
+            onComplete={(id) => void setStatus(id, 'COMPLETED')}
+            onRequestCancel={setCancelTarget}
           />
         </section>
       )}
@@ -231,6 +258,45 @@ export function AgendaPage() {
         onCreated={() => void load()}
         initialDate={selected}
       />
+
+      <ConfirmDialog
+        open={Boolean(cancelTarget)}
+        title="Cancelar agendamento?"
+        tone="danger"
+        confirmLabel="Sim, cancelar"
+        cancelLabel="Manter horário"
+        loading={Boolean(cancelTarget && busyId === cancelTarget.id)}
+        onClose={() => {
+          if (!busyId) setCancelTarget(null);
+        }}
+        onConfirm={() => {
+          if (cancelTarget) void setStatus(cancelTarget.id, 'CANCELLED');
+        }}
+        description={
+          cancelTarget ? (
+            <>
+              <p>
+                O horário será liberado na agenda do profissional. Esta ação não pode ser
+                desfeita de forma automática.
+              </p>
+              <div className="confirm-modal__meta">
+                <strong>{cancelTarget.client.name}</strong>
+                <span>
+                  {formatTime(cancelTarget.startTime)} · {cancelTarget.service.name} ·{' '}
+                  {cancelTarget.professional.name}
+                </span>
+                <span>
+                  {new Date(cancelTarget.startTime).toLocaleDateString('pt-BR', {
+                    weekday: 'long',
+                    day: '2-digit',
+                    month: 'long',
+                  })}
+                </span>
+              </div>
+            </>
+          ) : null
+        }
+      />
     </>
   );
 }
@@ -238,11 +304,17 @@ export function AgendaPage() {
 function AgendaTable({
   items,
   showDate,
+  busyId,
+  onMarkArrived,
   onComplete,
+  onRequestCancel,
 }: {
   items: Appointment[];
   showDate?: boolean;
+  busyId: string | null;
+  onMarkArrived: (id: string) => void;
   onComplete: (id: string) => void;
+  onRequestCancel: (item: Appointment) => void;
 }) {
   return (
     <div className="table-wrap">
@@ -260,36 +332,73 @@ function AgendaTable({
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => (
-            <tr key={item.id}>
-              {showDate ? (
-                <td>
-                  {new Date(item.startTime).toLocaleDateString('pt-BR')}
-                </td>
-              ) : null}
-              <td>{formatTime(item.startTime)}</td>
-              <td>{item.client.name}</td>
-              <td>{item.service.name}</td>
-              <td>{item.professional.name}</td>
-              <td>{formatCurrency(item.service.price)}</td>
-              <td>
-                <span className={statusClass(item.status)}>
-                  {statusLabel(item.status)}
-                </span>
-              </td>
-              <td>
-                {item.status !== 'COMPLETED' && item.status !== 'CANCELLED' ? (
-                  <button
-                    type="button"
-                    className="btn btn--ghost"
-                    onClick={() => onComplete(item.id)}
-                  >
-                    Concluir
-                  </button>
+          {items.map((item) => {
+            const canArrive =
+              item.status === 'PENDING' || item.status === 'CONFIRMED';
+            const canComplete =
+              item.status === 'PENDING' ||
+              item.status === 'CONFIRMED' ||
+              item.status === 'WAITING';
+            const canCancel =
+              item.status === 'PENDING' ||
+              item.status === 'CONFIRMED' ||
+              item.status === 'WAITING';
+            const busy = busyId === item.id;
+            return (
+              <tr key={item.id}>
+                {showDate ? (
+                  <td>{new Date(item.startTime).toLocaleDateString('pt-BR')}</td>
                 ) : null}
-              </td>
-            </tr>
-          ))}
+                <td>{formatTime(item.startTime)}</td>
+                <td>{item.client.name}</td>
+                <td>{item.service.name}</td>
+                <td>{item.professional.name}</td>
+                <td>{formatCurrency(item.service.price)}</td>
+                <td>
+                  <span
+                    className={statusClass(item.status)}
+                    title={statusDisplayLabel(item.status)}
+                  >
+                    {statusDisplayLabel(item.status)}
+                  </span>
+                </td>
+                <td>
+                  <div className="table-actions">
+                    {canArrive ? (
+                      <button
+                        type="button"
+                        className="btn btn--soft"
+                        disabled={busy}
+                        onClick={() => onMarkArrived(item.id)}
+                      >
+                        {busy ? '…' : 'Cliente chegou'}
+                      </button>
+                    ) : null}
+                    {canComplete ? (
+                      <button
+                        type="button"
+                        className="btn btn--ghost"
+                        disabled={busy}
+                        onClick={() => onComplete(item.id)}
+                      >
+                        {busy ? '…' : 'Concluir'}
+                      </button>
+                    ) : null}
+                    {canCancel ? (
+                      <button
+                        type="button"
+                        className="btn btn--danger"
+                        disabled={busy}
+                        onClick={() => onRequestCancel(item)}
+                      >
+                        Cancelar
+                      </button>
+                    ) : null}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
           {!items.length ? (
             <tr>
               <td colSpan={showDate ? 8 : 7} className="empty">

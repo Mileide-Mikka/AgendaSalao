@@ -8,7 +8,7 @@ export const CreateAppointmentSchema = z.object({
     .datetime({ message: 'A data de início deve ser uma string ISO datetime válida' }),
   professionalId: z.string().uuid('ID do profissional inválido'),
   serviceId: z.string().uuid('ID do serviço inválido'),
-  status: z.enum(['PENDING', 'CONFIRMED', 'COMPLETED', 'CANCELLED']).optional(),
+  status: z.enum(['PENDING', 'CONFIRMED']).optional(),
   notes: z.string().max(500).optional(),
 });
 

@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { AppointmentModal } from '../components/appointments/AppointmentModal';
-import { api, type DashboardSummary } from '../lib/api';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { api, type Appointment, type DashboardSummary } from '../lib/api';
 import {
   formatCurrency,
   formatTime,
   greetingForNow,
   statusClass,
-  statusLabel,
+  statusDisplayLabel,
 } from '../lib/format';
 
 export function DashboardPage() {
@@ -16,6 +17,8 @@ export function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<Appointment | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   async function load() {
     try {
@@ -31,6 +34,23 @@ export function DashboardPage() {
   }, []);
 
   const firstName = user?.name.split(' ')[0] ?? 'equipe';
+
+  async function confirmCancel() {
+    if (!cancelTarget) return;
+    setCancelling(true);
+    try {
+      await api.appointments.updateStatus(cancelTarget.id, 'CANCELLED');
+      setCancelTarget(null);
+      setError(null);
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Erro ao cancelar agendamento',
+      );
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   return (
     <>
@@ -55,7 +75,12 @@ export function DashboardPage() {
           </div>
           <p className="stat-card__label">Agendamentos hoje</p>
           <p className="stat-card__value">{data?.appointmentsToday ?? '—'}</p>
-          <p className="stat-card__meta">{data?.confirmedToday ?? 0} confirmados</p>
+          <p className="stat-card__meta">
+            {data?.confirmedToday ?? 0} confirmados
+            {(data?.waitingToday ?? 0) > 0
+              ? ` · ${data?.waitingToday} aguardando`
+              : ''}
+          </p>
         </article>
         <article className="stat-card">
           <div className="stat-card__icon" aria-hidden>
@@ -108,6 +133,7 @@ export function DashboardPage() {
                 <th>Profissional</th>
                 <th>Valor</th>
                 <th>Status</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -120,14 +146,71 @@ export function DashboardPage() {
                   <td>{formatCurrency(item.service.price)}</td>
                   <td>
                     <span className={statusClass(item.status)}>
-                      {statusLabel(item.status)}
+                      {statusDisplayLabel(item.status)}
                     </span>
+                  </td>
+                  <td>
+                    <div className="table-actions">
+                      {item.status === 'PENDING' || item.status === 'CONFIRMED' ? (
+                        <button
+                          type="button"
+                          className="btn btn--soft"
+                          onClick={() =>
+                            void api.appointments
+                              .updateStatus(item.id, 'WAITING')
+                              .then(load)
+                              .catch((err) =>
+                                setError(
+                                  err instanceof Error
+                                    ? err.message
+                                    : 'Erro ao marcar chegada',
+                                ),
+                              )
+                          }
+                        >
+                          Chegou
+                        </button>
+                      ) : null}
+                      {item.status === 'WAITING' ||
+                      item.status === 'PENDING' ||
+                      item.status === 'CONFIRMED' ? (
+                        <button
+                          type="button"
+                          className="btn btn--ghost"
+                          onClick={() =>
+                            void api.appointments
+                              .updateStatus(item.id, 'COMPLETED')
+                              .then(load)
+                              .catch((err) =>
+                                setError(
+                                  err instanceof Error
+                                    ? err.message
+                                    : 'Erro ao concluir',
+                                ),
+                              )
+                          }
+                        >
+                          Concluir
+                        </button>
+                      ) : null}
+                      {item.status === 'PENDING' ||
+                      item.status === 'CONFIRMED' ||
+                      item.status === 'WAITING' ? (
+                        <button
+                          type="button"
+                          className="btn btn--danger"
+                          onClick={() => setCancelTarget(item)}
+                        >
+                          Cancelar
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
               {!data?.todayAgenda?.length ? (
                 <tr>
-                  <td colSpan={6} className="empty">
+                  <td colSpan={7} className="empty">
                     Nenhum agendamento para hoje.
                   </td>
                 </tr>
@@ -141,6 +224,36 @@ export function DashboardPage() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         onCreated={() => void load()}
+      />
+
+      <ConfirmDialog
+        open={Boolean(cancelTarget)}
+        title="Cancelar agendamento?"
+        tone="danger"
+        confirmLabel="Sim, cancelar"
+        cancelLabel="Manter horário"
+        loading={cancelling}
+        onClose={() => {
+          if (!cancelling) setCancelTarget(null);
+        }}
+        onConfirm={() => void confirmCancel()}
+        description={
+          cancelTarget ? (
+            <>
+              <p>
+                O horário será liberado na agenda do profissional. Confirme só se o
+                cliente ou o salão desistiu do atendimento.
+              </p>
+              <div className="confirm-modal__meta">
+                <strong>{cancelTarget.client.name}</strong>
+                <span>
+                  {formatTime(cancelTarget.startTime)} · {cancelTarget.service.name} ·{' '}
+                  {cancelTarget.professional.name}
+                </span>
+              </div>
+            </>
+          ) : null
+        }
       />
     </>
   );

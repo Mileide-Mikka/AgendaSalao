@@ -9,8 +9,11 @@ import {
   parseSalonDayEnd,
   parseSalonDayStart,
   todaySalonDateKey,
+  assertAppointmentInBusinessHours,
+  type SalonHoursConfig,
 } from '../../common/datetime/salon-time';
 import { PrismaService } from '../../prisma/prisma.service';
+import { BusinessService } from '../business/business.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
@@ -29,11 +32,18 @@ const ALLOWED_STATUS_TRANSITIONS: Record<
 > = {
   PENDING: [
     AppointmentStatus.CONFIRMED,
+    AppointmentStatus.WAITING,
     AppointmentStatus.COMPLETED,
     AppointmentStatus.CANCELLED,
   ],
   CONFIRMED: [
     AppointmentStatus.PENDING,
+    AppointmentStatus.WAITING,
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.CANCELLED,
+  ],
+  WAITING: [
+    AppointmentStatus.CONFIRMED,
     AppointmentStatus.COMPLETED,
     AppointmentStatus.CANCELLED,
   ],
@@ -43,13 +53,17 @@ const ALLOWED_STATUS_TRANSITIONS: Record<
 
 @Injectable()
 export class AppointmentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private business: BusinessService,
+  ) {}
 
   async create(dto: CreateAppointmentDto) {
-    const [service, professional, client] = await Promise.all([
+    const [service, professional, client, settings] = await Promise.all([
       this.prisma.service.findUnique({ where: { id: dto.serviceId } }),
       this.prisma.user.findUnique({ where: { id: dto.professionalId } }),
       this.prisma.client.findUnique({ where: { id: dto.clientId } }),
+      this.business.getSettings(),
     ]);
 
     if (!service) throw new NotFoundException('Serviço não encontrado');
@@ -63,8 +77,10 @@ export class AppointmentsService {
     if (Number.isNaN(start.getTime())) {
       throw new BadRequestException('Data de início inválida');
     }
+    this.assertNotInPast(start);
 
     const end = new Date(start.getTime() + service.durationInMinutes * 60_000);
+    this.assertBusinessHours(start, end, settings);
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -224,8 +240,11 @@ export class AppointmentsService {
     if (Number.isNaN(start.getTime())) {
       throw new BadRequestException('Data de início inválida');
     }
+    this.assertNotInPast(start);
 
     const end = new Date(start.getTime() + service.durationInMinutes * 60_000);
+    const settings = await this.business.getSettings();
+    this.assertBusinessHours(start, end, settings);
 
     return this.prisma.$transaction(
       async (tx) => {
@@ -266,6 +285,29 @@ export class AppointmentsService {
       : parseSalonDayStart(dateStr);
   }
 
+  private assertNotInPast(start: Date) {
+    const graceMs = 2 * 60_000;
+    if (start.getTime() < Date.now() - graceMs) {
+      throw new BadRequestException(
+        'Não é possível agendar ou reagendar no passado',
+      );
+    }
+  }
+
+  private assertBusinessHours(
+    start: Date,
+    end: Date,
+    settings: SalonHoursConfig,
+  ) {
+    try {
+      assertAppointmentInBusinessHours(start, end, settings);
+    } catch (err) {
+      throw new BadRequestException(
+        err instanceof Error ? err.message : 'Fora do horário de funcionamento',
+      );
+    }
+  }
+
   private async assertNoConflict(
     tx: Prisma.TransactionClient,
     professionalId: string,
@@ -277,7 +319,11 @@ export class AppointmentsService {
       where: {
         professionalId,
         status: {
-          in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+          in: [
+            AppointmentStatus.PENDING,
+            AppointmentStatus.CONFIRMED,
+            AppointmentStatus.WAITING,
+          ],
         },
         ...(excludeId ? { id: { not: excludeId } } : {}),
         startTime: { lt: end },

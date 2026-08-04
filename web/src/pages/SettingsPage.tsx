@@ -7,34 +7,29 @@ import {
   isValidBrPhone,
   phoneDigits,
 } from '../lib/phone';
+import {
+  readLocalSalonSettings,
+  settingsFromApi,
+  validateWeeklyHours,
+  writeLocalSalonSettings,
+  type SalonBusinessSettings,
+  WEEKDAY_LABELS,
+  WEEKDAY_UI_ORDER,
+  type WeekdayKey,
+} from '../lib/salonSettings';
 import { usePreferences } from '../preferences/PreferencesContext';
-
-type SalonSettings = {
-  name: string;
-  address: string;
-  openTime: string;
-  closeTime: string;
-  whatsappReminder: boolean;
-  cancelAlerts: boolean;
-};
-
-const STORAGE_KEY = 'belle-salon-settings';
-
-const defaults: SalonSettings = {
-  name: 'Belle Salão & Barbearia',
-  address: 'Rua das Flores, 123 — São Paulo, SP',
-  openTime: '09:00',
-  closeTime: '19:00',
-  whatsappReminder: true,
-  cancelAlerts: false,
-};
 
 export function SettingsPage() {
   const { user, setUser } = useAuth();
   const { theme, density, sidebar, setTheme, setDensity, setSidebar } =
     usePreferences();
-  const [settings, setSettings] = useState<SalonSettings>(defaults);
+  const [settings, setSettings] = useState<SalonBusinessSettings>(() =>
+    readLocalSalonSettings(),
+  );
   const [saved, setSaved] = useState(false);
+  const [salonError, setSalonError] = useState<string | null>(null);
+  const [savingSalon, setSavingSalon] = useState(false);
+  const isAdmin = user?.role === 'ADMIN';
 
   const [profilePassword, setProfilePassword] = useState('');
   const [name, setName] = useState(user?.name ?? '');
@@ -56,12 +51,17 @@ export function SettingsPage() {
   const [savingCreds, setSavingCreds] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setSettings({ ...defaults, ...JSON.parse(raw) });
-    } catch {
-      /* ignore */
-    }
+    setSettings(readLocalSalonSettings());
+    void api.business
+      .getSettings()
+      .then((biz) => {
+        const next = settingsFromApi(biz);
+        setSettings(next);
+        writeLocalSalonSettings(next);
+      })
+      .catch(() => {
+        /* offline / first load — keep local */
+      });
   }, []);
 
   useEffect(() => {
@@ -73,10 +73,55 @@ export function SettingsPage() {
     setEmail(user.email ?? '');
   }, [user]);
 
-  function save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
+  function patchDay(
+    key: WeekdayKey,
+    patch: Partial<{ open: boolean; openTime: string; closeTime: string }>,
+  ) {
+    setSettings((s) => ({
+      ...s,
+      weeklyHours: {
+        ...s.weeklyHours,
+        [key]: { ...s.weeklyHours[key], ...patch },
+      },
+    }));
+  }
+
+  async function save() {
+    setSalonError(null);
+    const hoursError = validateWeeklyHours(settings.weeklyHours);
+    if (hoursError) {
+      setSalonError(hoursError);
+      return;
+    }
+    if (settings.name.trim().length < 2) {
+      setSalonError('Informe o nome do estabelecimento.');
+      return;
+    }
+
+    setSavingSalon(true);
+    try {
+      const biz = await api.business.updateSettings({
+        name: settings.name.trim(),
+        address: settings.address.trim(),
+        weeklyHours: settings.weeklyHours,
+        whatsappReminder: settings.whatsappReminder,
+        cancelAlerts: settings.cancelAlerts,
+      });
+      const next = settingsFromApi(biz);
+      setSettings(next);
+      writeLocalSalonSettings(next);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1800);
+    } catch (err) {
+      writeLocalSalonSettings(settings);
+      setSalonError(
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível salvar no servidor. Dados ficaram só neste navegador.',
+      );
+    } finally {
+      setSavingSalon(false);
+    }
   }
 
   async function saveProfile(e: FormEvent) {
@@ -356,12 +401,25 @@ export function SettingsPage() {
       </section>
 
       <section className="settings-card">
-        <h2>Informações do salão</h2>
+        <h2>Estabelecimento e horário</h2>
+        <p className="msg-lead">
+          Defina o nome e o expediente do seu salão ou barbearia. A agenda só
+          aceita marcações nos dias e horários que você marcar como abertos —
+          cada estabelecimento usa a grade que fizer sentido para ele.
+        </p>
+        {!isAdmin ? (
+          <p className="msg-lead" style={{ color: 'var(--muted)' }}>
+            Só o administrador pode salvar o horário para todos no servidor. Você
+            ainda pode visualizar a grade atual.
+          </p>
+        ) : null}
+        {salonError ? <div className="error-banner">{salonError}</div> : null}
         <div className="form-grid">
           <label className="field">
-            <span>Nome do salão</span>
+            <span>Nome do estabelecimento</span>
             <input
               value={settings.name}
+              disabled={!isAdmin}
               onChange={(e) => setSettings((s) => ({ ...s, name: e.target.value }))}
             />
           </label>
@@ -369,27 +427,56 @@ export function SettingsPage() {
             <span>Endereço</span>
             <input
               value={settings.address}
+              disabled={!isAdmin}
               onChange={(e) => setSettings((s) => ({ ...s, address: e.target.value }))}
             />
           </label>
-          <div className="form-grid form-grid--2">
-            <label className="field">
-              <span>Abertura</span>
-              <input
-                type="time"
-                value={settings.openTime}
-                onChange={(e) => setSettings((s) => ({ ...s, openTime: e.target.value }))}
-              />
-            </label>
-            <label className="field">
-              <span>Fechamento</span>
-              <input
-                type="time"
-                value={settings.closeTime}
-                onChange={(e) => setSettings((s) => ({ ...s, closeTime: e.target.value }))}
-              />
-            </label>
+        </div>
+
+        <h3 className="settings-subhead">Horário de funcionamento</h3>
+        <div className="hours-week" role="table" aria-label="Horário semanal">
+          <div className="hours-week__head" role="row">
+            <span>Dia</span>
+            <span>Aberto</span>
+            <span>Abre</span>
+            <span>Fecha</span>
           </div>
+          {WEEKDAY_UI_ORDER.map((key) => {
+            const day = settings.weeklyHours[key];
+            return (
+              <div
+                key={key}
+                className={`hours-week__row${day.open ? '' : ' is-closed'}`}
+                role="row"
+              >
+                <span className="hours-week__day">{WEEKDAY_LABELS[key]}</span>
+                <label className="hours-week__toggle">
+                  <input
+                    type="checkbox"
+                    checked={day.open}
+                    disabled={!isAdmin}
+                    onChange={(e) => patchDay(key, { open: e.target.checked })}
+                    aria-label={`${WEEKDAY_LABELS[key]} aberto`}
+                  />
+                  <span>{day.open ? 'Sim' : 'Não'}</span>
+                </label>
+                <input
+                  type="time"
+                  value={day.openTime}
+                  disabled={!isAdmin || !day.open}
+                  onChange={(e) => patchDay(key, { openTime: e.target.value })}
+                  aria-label={`Abertura ${WEEKDAY_LABELS[key]}`}
+                />
+                <input
+                  type="time"
+                  value={day.closeTime}
+                  disabled={!isAdmin || !day.open}
+                  onChange={(e) => patchDay(key, { closeTime: e.target.value })}
+                  aria-label={`Fechamento ${WEEKDAY_LABELS[key]}`}
+                />
+              </div>
+            );
+          })}
         </div>
       </section>
 
@@ -433,8 +520,19 @@ export function SettingsPage() {
       </section>
 
       <div style={{ maxWidth: 720, display: 'flex', justifyContent: 'flex-end' }}>
-        <button type="button" className="btn btn--primary" onClick={save}>
-          {saved ? 'Salvo!' : 'Salvar alterações'}
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={savingSalon || !isAdmin}
+          onClick={() => void save()}
+        >
+          {savingSalon
+            ? 'Salvando…'
+            : saved
+              ? 'Salvo!'
+              : isAdmin
+                ? 'Salvar estabelecimento e horário'
+                : 'Somente administrador salva'}
         </button>
       </div>
     </>

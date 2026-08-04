@@ -42,7 +42,11 @@ export class DashboardService {
           where: {
             startTime: { gte: now },
             status: {
-              in: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+              in: [
+                AppointmentStatus.PENDING,
+                AppointmentStatus.CONFIRMED,
+                AppointmentStatus.WAITING,
+              ],
             },
           },
           include: {
@@ -57,6 +61,10 @@ export class DashboardService {
       (a) => a.status === AppointmentStatus.CONFIRMED,
     ).length;
 
+    const waitingToday = todayAppointments.filter(
+      (a) => a.status === AppointmentStatus.WAITING,
+    ).length;
+
     const expectedRevenue = todayAppointments.reduce(
       (sum, a) => sum + Number(a.service.price),
       0,
@@ -65,6 +73,7 @@ export class DashboardService {
     return {
       appointmentsToday: todayAppointments.length,
       confirmedToday,
+      waitingToday,
       expectedRevenue,
       activeClients,
       newClientsLast30Days: recentClients,

@@ -1,6 +1,20 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, type AppointmentStatus, type Client, type Professional, type Service } from '../../lib/api';
+import {
+  api,
+  type AppointmentStatus,
+  type Client,
+  type Professional,
+  type Service,
+} from '../../lib/api';
 import { localInputToIso, toLocalInputValue } from '../../lib/format';
+import {
+  readLocalSalonSettings,
+  resolveHoursForDate,
+  settingsFromApi,
+  validateAppointmentBusinessHours,
+  writeLocalSalonSettings,
+  type SalonBusinessSettings,
+} from '../../lib/salonSettings';
 
 type Props = {
   open: boolean;
@@ -21,6 +35,9 @@ export function AppointmentModal({ open, onClose, onCreated, initialDate }: Prop
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState<SalonBusinessSettings>(() =>
+    readLocalSalonSettings(),
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -30,16 +47,27 @@ export function AppointmentModal({ open, onClose, onCreated, initialDate }: Prop
       api.clients.list(),
       api.professionals.list(),
       api.services.list(),
+      api.business.getSettings().catch(() => null),
     ])
-      .then(([c, p, s]) => {
+      .then(([c, p, s, biz]) => {
         setClients(c);
         setProfessionals(p);
         setServices(s);
         setClientId(c[0]?.id ?? '');
         setProfessionalId(p[0]?.id ?? '');
         setServiceId(s[0]?.id ?? '');
+        let hoursCfg = readLocalSalonSettings();
+        if (biz) {
+          hoursCfg = settingsFromApi(biz);
+          writeLocalSalonSettings(hoursCfg);
+        }
+        setSettings(hoursCfg);
         if (initialDate) {
-          setStartTime(`${initialDate}T09:00`);
+          const probe = new Date(`${initialDate}T12:00:00`);
+          const dayHours = resolveHoursForDate(probe, hoursCfg);
+          setStartTime(
+            `${initialDate}T${dayHours.open ? dayHours.openTime : '09:00'}`,
+          );
         } else {
           setStartTime(toLocalInputValue());
         }
@@ -59,6 +87,20 @@ export function AppointmentModal({ open, onClose, onCreated, initialDate }: Prop
 
   const catalogReady =
     clients.length > 0 && professionals.length > 0 && services.length > 0;
+  const selectedService = services.find((s) => s.id === serviceId);
+  const duration = selectedService?.durationInMinutes ?? 60;
+
+  let previewHours = resolveHoursForDate(new Date(), settings);
+  try {
+    if (startTime) {
+      previewHours = resolveHoursForDate(
+        new Date(localInputToIso(startTime)),
+        settings,
+      );
+    }
+  } catch {
+    /* invalid while typing */
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -69,13 +111,32 @@ export function AppointmentModal({ open, onClose, onCreated, initialDate }: Prop
       );
       return;
     }
+
+    let iso: string;
+    try {
+      iso = localInputToIso(startTime);
+    } catch {
+      setError('Data/horário inválido.');
+      return;
+    }
+
+    const hoursError = validateAppointmentBusinessHours(
+      new Date(iso),
+      duration,
+      settings,
+    );
+    if (hoursError) {
+      setError(hoursError);
+      return;
+    }
+
     setSaving(true);
     try {
       await api.appointments.create({
         clientId,
         professionalId,
         serviceId,
-        startTime: localInputToIso(startTime),
+        startTime: iso,
         status,
       });
       onCreated();
@@ -97,6 +158,20 @@ export function AppointmentModal({ open, onClose, onCreated, initialDate }: Prop
         onClick={(e) => e.stopPropagation()}
       >
         <h3 id="new-appt-title">Novo agendamento</h3>
+        <p className="msg-lead" style={{ marginTop: '-0.35rem' }}>
+          {previewHours.open ? (
+            <>
+              Funcionamento ({previewHours.dayLabel.toLowerCase()}):{' '}
+              <strong>{previewHours.openTime}</strong> às{' '}
+              <strong>{previewHours.closeTime}</strong>
+            </>
+          ) : (
+            <>
+              <strong>Fechado</strong> {previewHours.dayLabel.toLowerCase()} —
+              escolha outro dia.
+            </>
+          )}
+        </p>
         {error ? <div className="error-banner">{error}</div> : null}
         {loading ? <p className="empty">Carregando…</p> : null}
         <form className="form-grid" onSubmit={onSubmit}>
@@ -143,7 +218,7 @@ export function AppointmentModal({ open, onClose, onCreated, initialDate }: Prop
                 {!services.length ? <option value="">Nenhum serviço</option> : null}
                 {services.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name}
+                    {s.name} ({s.durationInMinutes} min)
                   </option>
                 ))}
               </select>

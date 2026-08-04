@@ -2,6 +2,7 @@ export type Role = 'ADMIN' | 'PROFESSIONAL';
 export type AppointmentStatus =
   | 'PENDING'
   | 'CONFIRMED'
+  | 'WAITING'
   | 'COMPLETED'
   | 'CANCELLED';
 
@@ -67,6 +68,7 @@ export type Appointment = {
 export type DashboardSummary = {
   appointmentsToday: number;
   confirmedToday: number;
+  waitingToday?: number;
   expectedRevenue: number;
   activeClients: number;
   newClientsLast30Days: number;
@@ -270,5 +272,72 @@ export const api = {
           body: JSON.stringify(data),
         },
       ),
+  },
+  business: {
+    getSettings: () =>
+      request<{
+        id: string;
+        name: string;
+        address: string;
+        openTime: string;
+        closeTime: string;
+        saturdayOpenTime: string;
+        saturdayCloseTime: string;
+        weeklyHours: {
+          sun: { open: boolean; openTime: string; closeTime: string };
+          mon: { open: boolean; openTime: string; closeTime: string };
+          tue: { open: boolean; openTime: string; closeTime: string };
+          wed: { open: boolean; openTime: string; closeTime: string };
+          thu: { open: boolean; openTime: string; closeTime: string };
+          fri: { open: boolean; openTime: string; closeTime: string };
+          sat: { open: boolean; openTime: string; closeTime: string };
+        };
+        whatsappReminder: boolean;
+        cancelAlerts: boolean;
+      }>('/api/business/settings'),
+    updateSettings: (
+      data: Partial<{
+        name: string;
+        address: string;
+        openTime: string;
+        closeTime: string;
+        saturdayOpenTime: string;
+        saturdayCloseTime: string;
+        weeklyHours: {
+          sun: { open: boolean; openTime: string; closeTime: string };
+          mon: { open: boolean; openTime: string; closeTime: string };
+          tue: { open: boolean; openTime: string; closeTime: string };
+          wed: { open: boolean; openTime: string; closeTime: string };
+          thu: { open: boolean; openTime: string; closeTime: string };
+          fri: { open: boolean; openTime: string; closeTime: string };
+          sat: { open: boolean; openTime: string; closeTime: string };
+        };
+        whatsappReminder: boolean;
+        cancelAlerts: boolean;
+      }>,
+    ) =>
+      request<{
+        id: string;
+        name: string;
+        address: string;
+        openTime: string;
+        closeTime: string;
+        saturdayOpenTime: string;
+        saturdayCloseTime: string;
+        weeklyHours: {
+          sun: { open: boolean; openTime: string; closeTime: string };
+          mon: { open: boolean; openTime: string; closeTime: string };
+          tue: { open: boolean; openTime: string; closeTime: string };
+          wed: { open: boolean; openTime: string; closeTime: string };
+          thu: { open: boolean; openTime: string; closeTime: string };
+          fri: { open: boolean; openTime: string; closeTime: string };
+          sat: { open: boolean; openTime: string; closeTime: string };
+        };
+        whatsappReminder: boolean;
+        cancelAlerts: boolean;
+      }>('/api/business/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
   },
 };

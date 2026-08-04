@@ -23,10 +23,13 @@ export function formatTime(iso: string) {
 }
 
 export function formatDateKey(date: Date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
+  /** Calendar day of the salon (America/Sao_Paulo), not the browser offset alone. */
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
 }
 
 export function statusLabel(status: AppointmentStatus) {
@@ -35,10 +38,27 @@ export function statusLabel(status: AppointmentStatus) {
       return 'confirmado';
     case 'PENDING':
       return 'pendente';
+    case 'WAITING':
+      return 'aguardando';
     case 'COMPLETED':
       return 'concluido';
     case 'CANCELLED':
       return 'cancelado';
+  }
+}
+
+export function statusDisplayLabel(status: AppointmentStatus) {
+  switch (status) {
+    case 'CONFIRMED':
+      return 'Confirmado';
+    case 'PENDING':
+      return 'Pendente';
+    case 'WAITING':
+      return 'Aguardando atendimento';
+    case 'COMPLETED':
+      return 'Concluído';
+    case 'CANCELLED':
+      return 'Cancelado';
   }
 }
 
@@ -59,7 +79,11 @@ export function toLocalInputValue(date = new Date()) {
 }
 
 export function localInputToIso(value: string) {
-  return new Date(value).toISOString();
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('Data/horário inválido');
+  }
+  return date.toISOString();
 }
 
 export function initials(name: string) {

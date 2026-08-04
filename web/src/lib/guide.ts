@@ -17,7 +17,7 @@ export const GUIDE_LESSONS: GuideLesson[] = [
     summary: 'O sistema nasce vazio: você cadastra o que for do seu salão.',
     steps: [
       'No primeiro acesso, preencha seus dados (nome, profissão, telefone e e-mail) e troque a senha.',
-      'Em Configurações, ajuste o nome do salão, horário de funcionamento e o visual (tema claro/escuro).',
+      'Em Configurações, defina o nome do salão e o horário de cada dia da semana (a agenda só marca em dias abertos, no intervalo configurado).',
       'Use o botão de seta / três tracinhos no menu para compactar a barra lateral.',
     ],
     tip: 'Guarde bem a nova senha — ela protege toda a agenda do estabelecimento.',
