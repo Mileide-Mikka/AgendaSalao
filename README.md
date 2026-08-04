@@ -8,7 +8,33 @@ API NestJS + Prisma + PostgreSQL e frontend React (Vite) com login seguro.
 
 ### Painel
 
-![Painel do salão](docs/screenshots/painel.jpg)
+![Painel do salão](docs/screenshots/painel-atual.jpg)
+
+### Agenda (status e ações)
+
+Lista com filtros (incluindo **Aguardando**), ações **Cliente chegou**, **Concluir** e **Cancelar**.
+
+![Agenda de agendamentos](docs/screenshots/agenda.jpg)
+
+### Novo agendamento (respeita o expediente)
+
+O modal mostra o horário de funcionamento do dia escolhido e a API bloqueia fora desse intervalo.
+
+![Modal de novo agendamento](docs/screenshots/novo-agendamento.jpg)
+
+### Configuração de horário (grade semanal)
+
+Cada estabelecimento define, dia a dia, se está aberto e o horário de abrir/fechar.
+
+![Grade semanal de funcionamento](docs/screenshots/grade-semanal.jpg)
+
+![Tela de configurações com expediente](docs/screenshots/horario-funcionamento.jpg)
+
+### Comunicações (WhatsApp / mensagens)
+
+Central de mensagens com lista de clientes e histórico local.
+
+![Comunicações do salão](docs/screenshots/comunicacoes.jpg)
 
 ### Como usar
 
